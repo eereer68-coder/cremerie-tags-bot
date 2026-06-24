@@ -15,18 +15,32 @@
 const opentype = require("opentype.js");
 
 function loadFonts(renderCfg) {
-  return {
-    bold: opentype.loadSync(renderCfg.fonts.bold),
-    regular: opentype.loadSync(renderCfg.fonts.regular),
-  };
+  const bold = opentype.loadSync(renderCfg.fonts.bold);
+  const regular = opentype.loadSync(renderCfg.fonts.regular);
+  // פונט גיבוי (אופציונלי) לסימנים חסרים — מצורף לכל פונט ראשי
+  try {
+    if (renderCfg.fonts.fallbackBold) bold._fallback = opentype.loadSync(renderCfg.fonts.fallbackBold);
+    if (renderCfg.fonts.fallbackRegular) regular._fallback = opentype.loadSync(renderCfg.fonts.fallbackRegular);
+  } catch (e) { /* בלי גיבוי אם הקובץ חסר */ }
+  return { bold, regular };
+}
+
+// בחירת גליף: אם הפונט הראשי לא מכיל את התו (.notdef) ויש גיבוי — קח מהגיבוי.
+function resolveGlyph(font, ch) {
+  let g = font.charToGlyph(ch);
+  if ((!g || g.index === 0) && font._fallback) {
+    const g2 = font._fallback.charToGlyph(ch);
+    if (g2 && g2.index) return { glyph: g2, font: font._fallback };
+  }
+  return { glyph: g, font };
 }
 
 // רוחב מחרוזת (יחידות SVG) לפי advance widths, כולל מתיחה אופקית
 function measureWidth(font, text, size, xScale = 1) {
   let w = 0;
   for (const ch of [...text]) {
-    const g = font.charToGlyph(ch);
-    w += g.advanceWidth || 0;
+    const { glyph, font: gf } = resolveGlyph(font, ch);
+    w += (glyph.advanceWidth || 0) / gf.unitsPerEm * font.unitsPerEm;
   }
   return (w / font.unitsPerEm) * size * xScale;
 }
@@ -47,8 +61,9 @@ function lineToPaths(font, text, size, cx, baseline, xScale = 1, anchor = "cente
   const items = [];
 
   for (const i of order) {
-    const g = font.charToGlyph(chars[i]);
-    const adv = (g.advanceWidth || 0) * scale * xScale;
+    const { glyph: g, font: gf } = resolveGlyph(font, chars[i]);
+    const gscale = size / gf.unitsPerEm;
+    const adv = (g.advanceWidth || 0) * gscale * xScale;
     const p = g.getPath(0, 0, size); // baseline ב-0, קואורדינטות y כלפי מטה
     const bb = p.getBoundingBox();
     if (isFinite(bb.x1) && bb.x2 > bb.x1) {

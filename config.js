@@ -73,6 +73,9 @@ module.exports = {
     fonts: {
       bold: path.join(__dirname, "Rimona-Bold.ttf"),
       regular: path.join(__dirname, "Rimona-Regular.ttf"),
+      // פונט גיבוי לסימנים ש-Rimona (subset) לא מכילה: מקף, גרש, אפוסטרוף, %, ₪, סוגריים...
+      fallbackBold: path.join(__dirname, "Fallback-Bold.ttf"),
+      fallbackRegular: path.join(__dirname, "Fallback-Regular.ttf"),
     },
   },
 
