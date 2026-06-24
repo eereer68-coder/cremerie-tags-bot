@@ -43,6 +43,7 @@ module.exports = {
   },
 
   server: { port: process.env.PORT || 3000, webhookPath: "/webhook" },
+  printShop: process.env.PRINT_SHOP_WHATSAPP || "", // מספר וואטסאפ של בית הדפוס (לדוגמה 9725...)
 
   render: {
     defaultTemplate: "cakes",

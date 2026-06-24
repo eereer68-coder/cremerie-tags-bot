@@ -75,13 +75,18 @@ const draftButtons = {
     [{ text: "❌ בטל הכל", callback_data: "d:cancel" }],
   ],
 };
-const postButtons = {
-  inline_keyboard: [
+function postButtons() {
+  const rows = [
     [{ text: "🔁 שלח שוב", callback_data: "p:again" }, { text: "✏️ ערוך את הדף", callback_data: "p:edit" }],
     [{ text: "✂️ בלי קווי חיתוך", callback_data: "p:nocut" }, { text: "✂️ עם קווי חיתוך", callback_data: "p:withcut" }],
     [{ text: "📚 היסטוריה", callback_data: "p:history" }],
-  ],
-};
+  ];
+  if (config.printShop) {
+    const msg = encodeURIComponent("היי, מצורף קובץ תגיות להדפסה 🙏 (יש לצרף את ה-PDF ששלחה קרמית)");
+    rows.push([{ text: "📲 שלח לבית דפוס בוואטסאפ", url: `https://wa.me/${config.printShop}?text=${msg}` }]);
+  }
+  return { inline_keyboard: rows };
+}
 
 const GREETING =
   `היי, אני ${BOT}, העוזרת של קרמרי דה ל'אקלר חיפה 🍰\n` +
@@ -127,7 +132,7 @@ async function deliver(chatId, d, result) {
   await tg.sendDocument(chatId, result.path, result.caption);
   const notes = (result.notes || []).concat(drafts.qualityIssues(result.meta, []));
   if (notes.length) await tg.sendMessage(chatId, notes.join("\n"));
-  await tg.sendMessage(chatId, "מוכן ✓ מה עכשיו?", postButtons);
+  await tg.sendMessage(chatId, "מוכן ✓ מה עכשיו?", postButtons());
 }
 
 // ---------- admin ----------
@@ -140,14 +145,22 @@ async function tryAdmin(chatId, text) {
     const ok = products.remove(m[1].trim());
     await tg.sendMessage(chatId, ok ? `נמחק: ${m[1].trim()} ✓` : "לא נמצא מוצר כזה."); return true;
   }
+  if ((m = text.match(/^כבה מוצר\s*[:：]?\s*(.+)$/))) {
+    const ok = products.setActive(m[1].trim(), false);
+    await tg.sendMessage(chatId, ok ? `כובה: ${m[1].trim()} (לא יוצע יותר) ✓` : "לא נמצא מוצר כזה."); return true;
+  }
+  if ((m = text.match(/^הפעל מוצר\s*[:：]?\s*(.+)$/))) {
+    const ok = products.setActive(m[1].trim(), true);
+    await tg.sendMessage(chatId, ok ? `הופעל: ${m[1].trim()} ✓` : "לא נמצא מוצר כזה."); return true;
+  }
   if ((m = text.match(/^מוצר חדש\s*[:：]\s*(.+)$/s))) {
-    // פורמט: מוצר חדש: שם | תיאור | סוג
+    // פורמט: מוצר חדש: שם | תיאור | סוג | הערות(אופציונלי)
     const parts = m[1].split("|").map((x) => x.trim());
-    const [name, description, type] = parts;
-    if (!name) { await tg.sendMessage(chatId, "פורמט: מוצר חדש: שם | תיאור | עוגה/קינוח"); return true; }
-    const tkey = validKey(type) || (/(קינוח|אישי|desserts)/.test(type || "") ? "desserts" : "cakes");
-    products.add({ name, defaultDescription: description || "", shortDescription: description || "", premiumDescription: description || "", defaultTemplate: tkey, aliases: [], keywords: [] });
-    await tg.sendMessage(chatId, `נוסף לספרייה: ${name} (${config.render.templates[tkey].label}) ✓`); return true;
+    const [name, description, type, notes] = parts;
+    if (!name) { await tg.sendMessage(chatId, "פורמט: מוצר חדש: שם | תיאור | עוגה/קינוח/קוקי פאי | הערות"); return true; }
+    const tkey = validKey(type) || (/(קוקי|פאי)/.test(type || "") ? "cookiepie" : /(קינוח|אישי|desserts)/.test(type || "") ? "desserts" : "cakes");
+    products.add({ name, defaultDescription: description || "", shortDescription: description || "", premiumDescription: description || "", defaultTemplate: tkey, aliases: [], keywords: [], notes: notes || "", active: true });
+    await tg.sendMessage(chatId, `נוסף לספרייה: ${name} (${config.render.templates[tkey].label})${notes ? " | הערה: " + notes : ""} ✓`); return true;
   }
   return false;
 }

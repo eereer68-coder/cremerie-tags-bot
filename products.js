@@ -44,11 +44,13 @@ function find(query) {
   const q = norm(query);
   if (!q) return null;
   for (const p of all()) {
+    if (p.active === false) continue;
     const names = [p.name, ...(p.aliases || [])].map(norm);
     if (names.includes(q)) return p;
   }
   // התאמה חלקית (שם מוכל)
   for (const p of all()) {
+    if (p.active === false) continue;
     const names = [p.name, ...(p.aliases || [])].map(norm);
     if (names.some((n) => n && (q.includes(n) || n.includes(q)))) return p;
   }
@@ -75,6 +77,12 @@ function remove(name) {
   if (i < 0) return false;
   list.splice(i, 1); persist(); return true;
 }
-function list() { return all().map((p) => p.name); }
+function setActive(name, on) {
+  const list = all();
+  const i = list.findIndex((p) => norm(p.name) === norm(name));
+  if (i < 0) return false;
+  list[i].active = !!on; persist(); return true;
+}
+function list() { return all().map((p) => (p.active === false ? p.name + " (כבוי)" : p.name)); }
 
-module.exports = { all, find, describe, add, remove, list, persist };
+module.exports = { all, find, describe, add, remove, setActive, list, persist };
