@@ -76,7 +76,7 @@ async function renderDraft(items, opts = {}) {
   const tags = [];
   for (const it of items || []) {
     const n = Math.max(1, it.qty || 1);
-    for (let i = 0; i < n; i++) tags.push({ name: it.name, description: it.description, template: it.template || def });
+    for (let i = 0; i < n; i++) tags.push({ name: it.name, description: it.description, template: it.template || def, prices: it.prices });
   }
   if (tags.length === 0) { const e = new Error("אין פריטים."); e.code = "NO_TAGS"; throw e; }
   let restore = null;

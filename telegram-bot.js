@@ -20,6 +20,42 @@ const isHistory = (t) => /^(היסטוריה|\/history)\b/i.test(norm(t));
 const validKey = (k) => (config.render.templates[k] ? k : null);
 const isEditish = (t) => /^(שנה|תשנה|מחק|תמחק|הסר|הוסף|תוסיף|שכפל|תשכפל|כפול|קצר|תקצר|הארך|עדכן|החלף|תחליף|כולם|כולן|תעשה)\b/.test(norm(t)) || /יוקרת|פרימיום|קצר יותר/.test(norm(t));
 
+// --- קוקי פאי: זרימה מודרכת (סוג -> מחיר) ---
+const CP_RE = /קוקי\s*פאי|קוקיפאי/;
+const isCookiePieText = (t) => CP_RE.test(norm(t)) || /^(קוקי|פאי)$/.test(norm(t));
+function extractFlavor(text) {
+  let s = norm(text).replace(/[:：]/g, " ");
+  s = s.replace(/[למבה]?קוקי\s*פאי|קוקיפאי|[למבה]?קוקי|פאי/g, " ");
+  s = s.replace(/(^|\s)(תכיני|תכין|תעשי|תעשה|אפשר|רוצה|בבקשה|להכין|הכיני|הכין|תייצרי|צריך|צריכה)(?=\s|$)/g, " ");
+  s = s.replace(/(^|\s)(לי|תגית|תג|בטעם|טעם|סוג|של|עם)(?=\s|$)/g, " ");
+  s = s.replace(/\s+/g, " ").trim();
+  return s.length < 2 ? "" : s;
+}
+const cpPriceButtons = { inline_keyboard: [
+  [{ text: "✅ מחירים רגילים (₪38 / ₪45)", callback_data: "cp:regular" }],
+  [{ text: "✏️ מחירים אחרים", callback_data: "cp:custom" }],
+] };
+async function startCookiePie(chatId, text) {
+  const d = getDraft(chatId);
+  const flavor = extractFlavor(text);
+  d.items = []; d.awaiting = null;
+  d.cp = { name: "קוקי פאי", flavor: flavor || "", prices: null, stage: null };
+  saveDraft(chatId, d);
+  if (flavor) return askCookiePiePrice(chatId, d);
+  d.cp.stage = "flavor"; saveDraft(chatId, d);
+  return tg.sendMessage(chatId, 'קוקי פאי 🥧 איזה סוג? (זו השורה שמתחת לשם, למשל: פאדגי שוקולד ומרשמלו)');
+}
+async function askCookiePiePrice(chatId, d) {
+  d.cp.stage = "price"; saveDraft(chatId, d);
+  return tg.sendMessage(chatId, `יופי, "${d.cp.flavor}".\nהמחירים הרגילים: ללא גלידה ₪38 / עם כדור גלידה ₪45. להשאיר רגיל או מחירים אחרים?`, cpPriceButtons);
+}
+async function finalizeCookiePie(chatId, d) {
+  const it = { name: d.cp.name, description: d.cp.flavor, template: "cookiepie", qty: 1 };
+  if (d.cp.prices) it.prices = d.cp.prices;
+  d.items = [it]; d.cp.stage = null; saveDraft(chatId, d);
+  return showDraft(chatId, d);
+}
+
 function allowed(chatId) {
   const l = config.access.allowedChatIds;
   return l.length === 0 || l.includes(String(chatId));
@@ -51,8 +87,10 @@ const GREETING =
 function draftText(items) {
   let s = "📝 הנה הטיוטה:\n";
   items.forEach((t, i) => {
+    const priceStr = t.template === "cookiepie"
+      ? (t.prices ? ` | מחירים: ₪${t.prices[0]} / ₪${t.prices[1]}` : " | מחירים: ₪38 / ₪45 (רגיל)") : "";
     s += `\n${i + 1}. שם: ${t.name}\n   תיאור: ${t.description || "(ריק)"}\n   סוג: ${config.render.templates[t.template] ? config.render.templates[t.template].label : t.template}` +
-      (t.qty > 1 ? ` | כמות: ${t.qty}` : "") + "\n";
+      (t.qty > 1 ? ` | כמות: ${t.qty}` : "") + priceStr + "\n";
   });
   s += "\nלאשר ולהפיק PDF?";
   return s;
@@ -119,6 +157,25 @@ async function onMessage(chatId, text, name) {
 
   const d = getDraft(chatId);
 
+  // קוקי פאי: שלבי שיחה ממתינים
+  if (d.cp && d.cp.stage === "flavor") {
+    d.cp.flavor = norm(text); saveDraft(chatId, d);
+    return askCookiePiePrice(chatId, d);
+  }
+  if (d.cp && d.cp.stage === "price") {
+    if (/רגיל/.test(norm(text))) { d.cp.prices = null; return finalizeCookiePie(chatId, d); }
+    if (/אחר|אחרים|שונה/.test(norm(text))) { d.cp.stage = "price_custom"; saveDraft(chatId, d); return tg.sendMessage(chatId, "כתבי את שני המחירים: קודם ללא גלידה ואז עם כדור גלידה. למשל: 42 50"); }
+    return tg.sendMessage(chatId, "רגיל או אחרים?", cpPriceButtons);
+  }
+  if (d.cp && d.cp.stage === "price_custom") {
+    const nums = (norm(text).match(/\d{1,4}/g) || []);
+    if (nums.length < 2) return tg.sendMessage(chatId, "צריך שני מחירים, למשל: 42 50");
+    d.cp.prices = [nums[0], nums[1]]; saveDraft(chatId, d);
+    return finalizeCookiePie(chatId, d);
+  }
+  // בקשה חדשה לקוקי פאי (לא בזמן עריכה)
+  if (isCookiePieText(text) && !isEditish(text)) return startCookiePie(chatId, text);
+
   if (isAgain(text)) {
     if (!d.lastResult) return tg.sendMessage(chatId, "אין עדיין דף לשחזר 🙂");
     return tg.sendDocument(chatId, d.lastResult.path, d.lastResult.caption);
@@ -177,8 +234,11 @@ async function onCallback(chatId, data, cbId) {
   if (!allowed(chatId)) return;
   const d = getDraft(chatId);
 
+  if (data === "cp:regular") { const d = getDraft(chatId); if (!d.cp) return; d.cp.prices = null; return finalizeCookiePie(chatId, d); }
+  if (data === "cp:custom") { const d = getDraft(chatId); if (!d.cp) return; d.cp.stage = "price_custom"; saveDraft(chatId, d); return tg.sendMessage(chatId, "כתבי את שני המחירים: קודם ללא גלידה ואז עם כדור גלידה. למשל: 42 50"); }
   if (data.startsWith("settpl:")) { // בחירת תבנית ברירת מחדל מהתפריט
     const k = data.slice(7); if (!validKey(k)) return;
+    if (k === "cookiepie") return startCookiePie(chatId, "קוקי פאי");
     return tg.sendMessage(chatId, `נבחר ${config.render.templates[k].label}. כתבי מה מכינים ואסדר טיוטה 🙂`);
   }
   if (data.startsWith("h:")) {

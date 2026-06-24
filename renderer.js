@@ -7,6 +7,7 @@ const fs = require("fs");
 const path = require("path");
 const config = require("./config");
 const tl = require("./textLayout");
+const cpPrice = require("./cookiepie_price");
 const { pagesToPdf } = require("./pdf");
 
 class RenderError extends Error {
@@ -17,11 +18,13 @@ let _fonts = null;
 function fonts() { if (!_fonts) _fonts = tl.loadFonts(config.render); return _fonts; }
 
 const _artCache = {};
-function loadTemplate(key) {
+function loadTemplate(key, artFile) {
   const def = config.render.templates[key];
   if (!def) throw new RenderError(`טמפלייט לא מוכר: "${key}"`, "UNKNOWN_TEMPLATE");
-  if (_artCache[key]) return { def, ..._artCache[key] };
-  const artPath = path.join(config.paths.root, def.layout.art);
+  const artRel = artFile || def.layout.art;
+  const cacheKey = key + "::" + artRel;
+  if (_artCache[cacheKey]) return { def, ..._artCache[cacheKey] };
+  const artPath = path.join(config.paths.root, artRel);
   if (!fs.existsSync(artPath))
     throw new RenderError(`קובץ האמנות של הטמפלייט חסר: ${def.layout.art}`, "TEMPLATE_ART_MISSING");
   const raw = fs.readFileSync(artPath, "utf8");
@@ -29,14 +32,31 @@ function loadTemplate(key) {
   let vb = def.layout.viewBox || { w: 213.1, h: 142.23 };
   if (vbMatch) { const p = vbMatch[1].trim().split(/\s+/).map(Number); vb = { w: p[2], h: p[3] }; }
   const inner = raw.replace(/^[\s\S]*?<svg[^>]*>/i, "").replace(/<\/svg>\s*$/i, "");
-  _artCache[key] = { viewBox: vb, inner };
+  _artCache[cacheKey] = { viewBox: vb, inner };
   return { def, viewBox: vb, inner };
+}
+
+
+// סכומי קוקי פאי: ₪ קבוע (וקטור מהמקור) + ספרות מהפונט (LTR, עיגון-שמאל)
+function buildCookiePiePrices(prices, boldFont) {
+  const shekels = [cpPrice.shekelRow1, cpPrice.shekelRow2];
+  let inner = "";
+  for (let i = 0; i < Math.min(prices.length, cpPrice.rows.length); i++) {
+    const amt = String(prices[i]).replace(/[^0-9]/g, "");
+    if (!amt) continue;
+    inner += `<path d="${shekels[i]}"/>`;
+    inner += tl.lineToPaths(boldFont, amt, cpPrice.digitSize, cpPrice.digitLeftX, cpPrice.rows[i].baseline, 1, "left", "ltr").svg;
+  }
+  return inner ? `\n  <g fill="${cpPrice.fill}">${inner}</g>` : "";
 }
 
 function buildTagInner(tag, templateKey) {
   if (!tag || !tag.name) throw new RenderError("חסר שם בתגית.", "MISSING_NAME");
   if (!tag.description) throw new RenderError(`לתגית "${tag.name}" חסר תיאור.`, "MISSING_DESCRIPTION");
-  const { def, viewBox, inner } = loadTemplate(templateKey);
+  const usePrices = templateKey === "cookiepie" && Array.isArray(tag.prices) && tag.prices.length >= 1;
+  const _defTmp = config.render.templates[templateKey];
+  const _artOverride = usePrices && _defTmp ? (_defTmp.layout.artNoPrice || null) : null;
+  const { def, viewBox, inner } = loadTemplate(templateKey, _artOverride);
   const layout = def.layout;
   const f = fonts();
   const { minFontPx, fontShrinkStep } = config.render;
@@ -55,9 +75,13 @@ function buildTagInner(tag, templateKey) {
     ? ` stroke="${layout.desc.stroke}" stroke-width="${layout.desc.strokeWidth || 0.25}" stroke-miterlimit="10"`
     : "";
 
+  let priceSvg = "";
+  if (usePrices) priceSvg = buildCookiePiePrices(tag.prices, f.bold);
+
   const tagInner = inner +
     `\n  <g fill="${layout.fill}">${nameRes.svg}</g>` +
-    `\n  <g fill="${layout.fill}"${strokeAttr}>${descPaths}</g>`;
+    `\n  <g fill="${layout.fill}"${strokeAttr}>${descPaths}</g>` +
+    priceSvg;
 
   return { inner: tagInner, viewBox,
     meta: { name: tag.name, nameSize, descSize: fit.size, descLines: fit.lines, truncated: fit.truncated } };

@@ -36,9 +36,9 @@ function measureWidth(font, text, size, xScale = 1) {
  * הטקסט ממורכז לפי תיבת-הדיו (ink bbox) סביב cx, וקו הבסיס ב-baseline.
  * RTL: סדר חזותי = היפוך הסדר הלוגי (מתאים לעברית עם רווחים/פיסוק בסיסי).
  */
-function lineToPaths(font, text, size, cx, baseline, xScale = 1) {
+function lineToPaths(font, text, size, cx, baseline, xScale = 1, anchor = "center", dir = "rtl") {
   const chars = [...text];
-  const order = chars.map((_, i) => i).reverse(); // סדר חזותי RTL
+  const order = dir === "ltr" ? chars.map((_, i) => i) : chars.map((_, i) => i).reverse(); // RTL=היפוך, LTR=כסדר (לספרות)
   const scale = size / font.unitsPerEm;
 
   let x = 0;
@@ -65,7 +65,10 @@ function lineToPaths(font, text, size, cx, baseline, xScale = 1) {
     inkLo = 0;
     inkHi = 0;
   }
-  const shift = cx - (inkLo + inkHi) / 2; // מרכוז לפי דיו
+  let shift;
+  if (anchor === "left") shift = cx - inkLo;        // קצה דיו שמאלי ב-cx
+  else if (anchor === "right") shift = cx - inkHi;  // קצה דיו ימני ב-cx
+  else shift = cx - (inkLo + inkHi) / 2;            // מרכוז לפי דיו
 
   const paths = items.map(
     (it) =>
