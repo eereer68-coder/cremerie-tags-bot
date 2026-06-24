@@ -5,6 +5,8 @@ const ai = require("./ai");
 const products = require("./products");
 const drafts = require("./drafts");
 const { processToPdf, renderDraft, friendlyError } = require("./pipeline");
+const { parseList } = require("./listParser");
+const { resolveTemplate } = require("./route");
 
 const BOT = "קרמית";
 const EMOJI = { cakes: "🎂", desserts: "🍰", cupcakes: "🧁", cookiepie: "🥧" };
@@ -17,6 +19,7 @@ const isMenu = (t) => /^\/(start|menu|help)\b/i.test(norm(t)) || norm(t) === "ת
 const isWhoami = (t) => /^\/whoami\b/i.test(norm(t));
 const isAgain = (t) => /^(שוב|שלח שוב|\/again)\b/i.test(norm(t));
 const isHistory = (t) => /^(היסטוריה|\/history)\b/i.test(norm(t));
+const isDebug = (t) => /^\/debug\b/i.test(norm(t)) || norm(t) === "בדיקה";
 const validKey = (k) => (config.render.templates[k] ? k : null);
 const isEditish = (t) => /^(שנה|תשנה|מחק|תמחק|הסר|הוסף|תוסיף|שכפל|תשכפל|כפול|קצר|תקצר|הארך|עדכן|החלף|תחליף|כולם|כולן|תעשה)\b/.test(norm(t)) || /יוקרת|פרימיום|קצר יותר/.test(norm(t));
 
@@ -52,7 +55,7 @@ async function askCookiePiePrice(chatId, d) {
 async function finalizeCookiePie(chatId, d) {
   const it = { name: d.cp.name, description: d.cp.flavor, template: "cookiepie", qty: 1 };
   if (d.cp.prices) it.prices = d.cp.prices;
-  d.items = [it]; d.cp.stage = null; saveDraft(chatId, d);
+  d.items = (d.items || []).concat([it]); d.cp.stage = null; saveDraft(chatId, d);
   return showDraft(chatId, d);
 }
 
@@ -66,9 +69,10 @@ function templatesMenu(prefix) {
 }
 const draftButtons = {
   inline_keyboard: [
-    [{ text: "✅ הפק PDF", callback_data: "d:pdf" }],
-    [{ text: "✏️ ערוך", callback_data: "d:edit" }, { text: "🔁 קצר תיאורים", callback_data: "d:short" }],
-    [{ text: "🎨 שנה תבנית", callback_data: "d:chtpl" }, { text: "❌ בטל", callback_data: "d:cancel" }],
+    [{ text: "✅ סיום והפקת PDF", callback_data: "d:pdf" }],
+    [{ text: "➕ עוד תג", callback_data: "d:more" }, { text: "✏️ ערוך", callback_data: "d:edit" }],
+    [{ text: "🔁 קצר תיאורים", callback_data: "d:short" }, { text: "🎨 שנה תבנית", callback_data: "d:chtpl" }],
+    [{ text: "❌ בטל הכל", callback_data: "d:cancel" }],
   ],
 };
 const postButtons = {
@@ -85,14 +89,14 @@ const GREETING =
   "אסדר טיוטה, תאשרי, ואז אפיק PDF מוכן להדפסה.";
 
 function draftText(items) {
-  let s = "📝 הנה הטיוטה:\n";
+  let s = `📝 בטיוטה ${items.length} ${items.length === 1 ? "תג" : "תגיות"}:\n`;
   items.forEach((t, i) => {
     const priceStr = t.template === "cookiepie"
       ? (t.prices ? ` | מחירים: ₪${t.prices[0]} / ₪${t.prices[1]}` : " | מחירים: ₪38 / ₪45 (רגיל)") : "";
     s += `\n${i + 1}. שם: ${t.name}\n   תיאור: ${t.description || "(ריק)"}\n   סוג: ${config.render.templates[t.template] ? config.render.templates[t.template].label : t.template}` +
       (t.qty > 1 ? ` | כמות: ${t.qty}` : "") + priceStr + "\n";
   });
-  s += "\nלאשר ולהפיק PDF?";
+  s += "\nלהוסיף עוד תג, או לסיים ולהפיק PDF?";
   return s;
 }
 
@@ -149,6 +153,18 @@ async function tryAdmin(chatId, text) {
 }
 
 // ---------- main message handler ----------
+async function sendDebug(chatId, text, a, built) {
+  let s = "🔎 בדיקה:\n";
+  s += `• נשלח: ${norm(text)}\n`;
+  s += `• הבנת AI: intent=${a.intent}, ביטחון=${a.confidence}\n`;
+  if (built && built.length) {
+    built.forEach((t, i) => { s += `• פריט ${i + 1}: "${t.name}" | תבנית=${t.template} | כמות=${t.qty} | תיאור מ: ${t.source}${t.missingDesc ? " (חסר!)" : ""}\n`; });
+    const iss = drafts.qualityIssues([], built);
+    s += `• Quality Guard: ${iss.length ? iss.length + " התראות" : "תקין"}\n`;
+  } else { s += "• לא זוהו פריטים\n"; }
+  return tg.sendMessage(chatId, s);
+}
+
 async function onMessage(chatId, text, name) {
   log("[msg]", chatId, name || "", "|", norm(text).slice(0, 80));
   if (!allowed(chatId)) return tg.sendMessage(chatId, "הבוט פרטי 🙂 פני לבעל העסק לקבלת גישה.");
@@ -156,6 +172,8 @@ async function onMessage(chatId, text, name) {
   if (isMenu(text)) return tg.sendMessage(chatId, GREETING, templatesMenu("settpl:"));
 
   const d = getDraft(chatId);
+  if (isDebug(text)) { d.debug = !d.debug; saveDraft(chatId, d); return tg.sendMessage(chatId, d.debug ? "🔎 מצב בדיקה פעיל. שלחי הודעה כדי לראות מה הבנתי." : "מצב בדיקה כבוי."); }
+  if (d.awaiting === "newtag") { d.awaiting = null; saveDraft(chatId, d); }
 
   // קוקי פאי: שלבי שיחה ממתינים
   if (d.cp && d.cp.stage === "flavor") {
@@ -186,6 +204,7 @@ async function onMessage(chatId, text, name) {
   // עריכה טבעית: יש טיוטה והטקסט נראה כהוראת עריכה (גם בלי כפתור)
   if (d.items.length && (d.awaiting === "edit" || isEditish(text))) {
     d.awaiting = null;
+    await tg.sendMessage(chatId, "רגע, מעדכנת... ⏳");
     try {
       const { items, userReply } = await ai.editDraft(d.items, text);
       if (items && items.length) { d.items = mapEdited(items, config.render.defaultTemplate); saveDraft(chatId, d);
@@ -198,9 +217,12 @@ async function onMessage(chatId, text, name) {
 
   // פורמט מסודר -> מצב מהיר (הפקה מיידית)
   if (isList(text)) {
-    try { const r = await processToPdf(text);
-      const dd = getDraft(chatId); dd.items = r.tags.map((t) => ({ name: t.name, description: t.description, template: t.template, qty: 1 }));
-      return deliver(chatId, dd, r);
+    try {
+      const { templateKey, text: body } = resolveTemplate(text);
+      const { tags } = parseList(body, templateKey);
+      const built = tags.map((t) => ({ name: t.name, description: t.description, template: t.template || templateKey, qty: 1, missingDesc: !t.description, source: "AI/משתמש" }));
+      d.items = (d.items || []).concat(built); saveDraft(chatId, d);
+      return showDraft(chatId, d);
     } catch (err) { return tg.sendMessage(chatId, friendlyError(err)); }
   }
 
@@ -208,10 +230,12 @@ async function onMessage(chatId, text, name) {
   if (ai.enabled() && norm(text).length > 1) {
     try {
       const a = await ai.analyze(text);
-      if (a.intent === "chat" || a.confidence < 0.5 || !a.items.length) {
+      const built = (a.items && a.items.length) ? drafts.buildItems(a.items, config.render.defaultTemplate) : [];
+      if (d.debug) await sendDebug(chatId, text, a, built);
+      if (a.intent === "chat" || a.confidence < 0.5 || !built.length) {
         return tg.sendMessage(chatId, a.userReply || "לא בטוחה שהבנתי 🙂 כתבי לי מה מכינים, או /menu לדוגמה.");
       }
-      d.items = drafts.buildItems(a.items, config.render.defaultTemplate);
+      d.items = (d.items || []).concat(built);
       d.awaiting = null; saveDraft(chatId, d);
       if (a.userReply) await tg.sendMessage(chatId, a.userReply);
       return showDraft(chatId, d);
@@ -248,12 +272,14 @@ async function onCallback(chatId, data, cbId) {
   }
 
   // טיוטה
+  if (data === "d:more") { d.awaiting = "newtag"; saveDraft(chatId, d); return tg.sendMessage(chatId, "מה התג הבא? כתבי שם + תיאור, או 'קוקי פאי', או 'סוג: קינוח'."); }
   if (data === "d:pdf") {
     if (!d.items.length) return tg.sendMessage(chatId, "אין טיוטה. כתבי מה מכינים 🙂");
     const missing = d.items.filter((t) => t.missingDesc);
     if (missing.length) return tg.sendMessage(chatId, `לפני הפקה, חסר תיאור ל: ${missing.map((t) => t.name).join(", ")}.\nכתבי "ערוך" והוסיפי תיאור, או "תכתבי תיאור ל${missing[0].name}".`);
     try { const r = await renderDraft(d.items, { def: config.render.defaultTemplate });
-      d.awaiting = null; return deliver(chatId, d, r);
+      d.awaiting = null; await deliver(chatId, d, r);
+      d.items = []; d.cp = null; saveDraft(chatId, d); return;
     } catch (e) { return tg.sendMessage(chatId, friendlyError(e)); }
   }
   if (data === "d:edit") { d.awaiting = "edit"; saveDraft(chatId, d);
@@ -261,6 +287,7 @@ async function onCallback(chatId, data, cbId) {
   }
   if (data === "d:short" || data === "d:premium") {
     const instr = data === "d:short" ? "קצר את כל התיאורים" : "תעשה תיאור יוקרתי יותר";
+    await tg.sendMessage(chatId, "רגע, משכתבת... ⏳");
     try { const { items } = await ai.editDraft(d.items, instr);
       if (items) { d.items = mapEdited(items, config.render.defaultTemplate); saveDraft(chatId, d); return showDraft(chatId, d); }
     } catch (e) { log(e.message); }
@@ -276,9 +303,10 @@ async function onCallback(chatId, data, cbId) {
   if (data === "p:again") { if (d.lastResult) return tg.sendDocument(chatId, d.lastResult.path, d.lastResult.caption); return; }
   if (data === "p:edit") { d.awaiting = "edit"; saveDraft(chatId, d); return tg.sendMessage(chatId, "כתבי מה לשנות בדף 🙂"); }
   if (data === "p:nocut" || data === "p:withcut") {
-    if (!d.items.length) return tg.sendMessage(chatId, "אין דף פעיל.");
-    try { const r = await renderDraft(d.items, { def: config.render.defaultTemplate, cutLines: data === "p:withcut" });
-      return deliver(chatId, d, r);
+    const src = (d.lastResult && d.lastResult.items) || d.items;
+    if (!src || !src.length) return tg.sendMessage(chatId, "אין דף פעיל.");
+    try { const r = await renderDraft(src, { def: config.render.defaultTemplate, cutLines: data === "p:withcut" });
+      d.items = src; return deliver(chatId, d, r);
     } catch (e) { return tg.sendMessage(chatId, friendlyError(e)); }
   }
   if (data === "p:history") return sendHistory(chatId, d);

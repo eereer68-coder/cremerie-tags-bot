@@ -22,7 +22,8 @@ function buildItems(aiItems, defaultTemplate) {
     const name = prod ? prod.name : x.name;
     const template = validKey(x.type) || (prod && validKey(prod.defaultTemplate)) || def;
     const missingDesc = !description;
-    return { name, description, template, qty: Math.max(1, x.qty || 1), missingDesc };
+    const source = x.description ? "AI/משתמש" : (prod ? "ספריית מוצרים" : "חסר");
+    return { name, description, template, qty: Math.max(1, x.qty || 1), missingDesc, source, known: !!prod };
   });
 }
 
