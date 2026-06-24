@@ -22,10 +22,10 @@ async function renderTags(tags, def) {
   const result = await renderTagsToPdf(tags, { templateKey: def });
   const labelOf = (t) => config.render.templates[t.template || def].label;
   const usedLabels = [...new Set(tags.map(labelOf))];
-  const caption = `הנה ${tags.length} תגיות (${usedLabels.join(" + ")}) — ${result.pages} עמ' A4 מוכן להדפסה 🎂`;
+  const caption = `הנה ${tags.length} תגיות (${usedLabels.join(", ")}). ${result.pages} עמ' A4 מוכן להדפסה 🎂`;
   const notes = [];
   result.meta.forEach((m) => {
-    if (m.truncated) notes.push(`⚠️ "${m.name}": התיאור ארוך מדי ונחתך — כדאי לקצר.`);
+    if (m.truncated) notes.push(`⚠️ "${m.name}": התיאור ארוך מדי ונחתך, כדאי לקצר.`);
     else if (m.descSize <= config.render.minFontPx + 0.01) notes.push(`ℹ️ "${m.name}": התיאור ארוך, הוקטן כדי להיכנס.`);
   });
   return { ...result, caption, count: tags.length, notes, tags, def };
@@ -60,7 +60,7 @@ function friendlyError(err) {
     NO_TAGS: 'לא זיהיתי תגית 🤔 כך שולחים:\n\nשם: בלאק פורסט\nתיאור: מוס שוקולד ודובדבני אמרנה\n\nאו פשוט כתבו לי חופשי מה צריך.',
     MISSING_NAME: 'לאחת התגיות חסר שם 🙂 הוסיפו "שם: ...".',
     MISSING_DESCRIPTION: 'לאחת התגיות חסר תיאור 🙂 הוסיפו "תיאור: ...".',
-    TOO_MANY_TAGS: "יש הרבה מאוד תגיות — נסו פחות בכל פעם.",
+    TOO_MANY_TAGS: "יש הרבה מאוד תגיות, נסו פחות בכל פעם.",
     UNKNOWN_TEMPLATE: "סוג לא מוכר. אפשר: עוגות גדולות / קינוחים אישיים.",
     TEMPLATE_ART_MISSING: "תקלה זמנית בטמפלייט. נסו שוב.",
     PDF_RENDER_FAILED: "לא הצלחתי לייצר PDF. נסו שוב בעוד רגע.",

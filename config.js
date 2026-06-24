@@ -53,6 +53,18 @@ module.exports = {
         aliases: ["קינוח", "קינוחים", "אישיים", "desserts"],
         layout: { ...cakesLayout, art: "desserts.svg", viewBox: { w: 213.6, h: 142.73 }, name: { ...cakesLayout.name, size: 31 } },
       },
+      cookiepie: {
+        label: "קוקי פאי",
+        aliases: ["קוקי", "קוקי פאי", "קוקיפאי", "cookie pie", "cookiepie", "פאי"],
+        // שם + סוג (תיאור) נערכים; המחירים והקישוט סטטיים בתוך האמנות
+        layout: {
+          art: "cookiepie.svg",
+          viewBox: { w: 213.1, h: 142.23 },
+          name: { cx: 106.3, baseline: 42.0, size: 34.39, xScale: 1.0, weight: "bold", maxWidth: 180 },
+          desc: { cx: 106.6, blockCenterY: 62.5, size: 17, lineHeight: 18, weight: "regular", maxWidth: 188, maxLines: 1 },
+          fill: "#231f20",
+        },
+      },
     },
     minFontPx: 9,
     fontShrinkStep: 0.5,

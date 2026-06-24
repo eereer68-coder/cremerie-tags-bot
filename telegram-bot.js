@@ -7,7 +7,7 @@ const drafts = require("./drafts");
 const { processToPdf, renderDraft, friendlyError } = require("./pipeline");
 
 const BOT = "קרמית";
-const EMOJI = { cakes: "🎂", desserts: "🍰", cupcakes: "🧁" };
+const EMOJI = { cakes: "🎂", desserts: "🍰", cupcakes: "🧁", cookiepie: "🥧" };
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 
 // ---------- helpers ----------
@@ -44,14 +44,14 @@ const postButtons = {
 };
 
 const GREETING =
-  `היי, אני ${BOT} — העוזרת של Cremerie 🍰\n` +
+  `היי, אני ${BOT}, העוזרת של קרמרי דה ל'אקלר חיפה 🍰\n` +
   "כתבי לי חופשי מה מכינים היום (למשל: \"בלאק פורסט, פבלובה כפול 4, וטארט לימון יוקרתי\"), " +
-  "אסדר טיוטה, תאשרי — ואז אפיק PDF מוכן להדפסה.";
+  "אסדר טיוטה, תאשרי, ואז אפיק PDF מוכן להדפסה.";
 
 function draftText(items) {
   let s = "📝 הנה הטיוטה:\n";
   items.forEach((t, i) => {
-    s += `\n${i + 1}. שם: ${t.name}\n   תיאור: ${t.description || "—"}\n   סוג: ${config.render.templates[t.template] ? config.render.templates[t.template].label : t.template}` +
+    s += `\n${i + 1}. שם: ${t.name}\n   תיאור: ${t.description || "(ריק)"}\n   סוג: ${config.render.templates[t.template] ? config.render.templates[t.template].label : t.template}` +
       (t.qty > 1 ? ` | כמות: ${t.qty}` : "") + "\n";
   });
   s += "\nלאשר ולהפיק PDF?";
@@ -191,7 +191,7 @@ async function onCallback(chatId, data, cbId) {
   if (data === "d:pdf") {
     if (!d.items.length) return tg.sendMessage(chatId, "אין טיוטה. כתבי מה מכינים 🙂");
     const missing = d.items.filter((t) => t.missingDesc);
-    if (missing.length) return tg.sendMessage(chatId, `לפני הפקה — חסר תיאור ל: ${missing.map((t) => t.name).join(", ")}.\nכתבי "ערוך" והוסיפי תיאור, או "תכתבי תיאור ל${missing[0].name}".`);
+    if (missing.length) return tg.sendMessage(chatId, `לפני הפקה, חסר תיאור ל: ${missing.map((t) => t.name).join(", ")}.\nכתבי "ערוך" והוסיפי תיאור, או "תכתבי תיאור ל${missing[0].name}".`);
     try { const r = await renderDraft(d.items, { def: config.render.defaultTemplate });
       d.awaiting = null; return deliver(chatId, d, r);
     } catch (e) { return tg.sendMessage(chatId, friendlyError(e)); }

@@ -30,12 +30,12 @@ function buildItems(aiItems, defaultTemplate) {
 function qualityIssues(meta, items) {
   const issues = [];
   (meta || []).forEach((m) => {
-    if (m.truncated) issues.push(`⚠️ "${m.name}" — התיאור ארוך מדי ונחתך. כדאי לקצר.`);
-    else if (m.descSize <= config.render.minFontPx + 0.01) issues.push(`⚠️ "${m.name}" — התיאור ארוך, הפונט הוקטן מאוד.`);
+    if (m.truncated) issues.push(`⚠️ "${m.name}": התיאור ארוך מדי ונחתך. כדאי לקצר.`);
+    else if (m.descSize <= config.render.minFontPx + 0.01) issues.push(`⚠️ "${m.name}": התיאור ארוך, הפונט הוקטן מאוד.`);
   });
   (items || []).forEach((t) => {
-    if (t.missingDesc) issues.push(`❓ "${t.name}" — חסר תיאור. רוצה שאכתוב לך אחד?`);
-    if (!config.render.templates[t.template]) issues.push(`❓ "${t.name}" — חסר/לא ברור סוג תבנית.`);
+    if (t.missingDesc) issues.push(`❓ "${t.name}": חסר תיאור. רוצה שאכתוב לך אחד?`);
+    if (!config.render.templates[t.template]) issues.push(`❓ "${t.name}": חסר/לא ברור סוג תבנית.`);
   });
   return issues;
 }
