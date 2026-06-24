@@ -29,8 +29,8 @@ module.exports = {
     anthropic: {
       apiKey: process.env.ANTHROPIC_API_KEY || "",
       // ניתן לעקוף עם AI_MODEL; יש fallback אוטומטי אם המודל לא קיים בחשבון
-      model: process.env.AI_MODEL || "claude-3-5-haiku-20241022",
-      fallbackModels: ["claude-3-5-haiku-20241022", "claude-3-haiku-20240307", "claude-3-5-sonnet-20241022"],
+      model: process.env.AI_MODEL || "claude-haiku-4-5-20251001",
+      fallbackModels: ["claude-haiku-4-5-20251001", "claude-3-5-haiku-latest", "claude-sonnet-4-5-20250929"],
     },
     maxTokens: 1024,
   },

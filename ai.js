@@ -1,6 +1,7 @@
-// lib/ai.js — שכבת AI: שיחה טבעית + הפקת תגיות + תיאורים פרימיום + תיקון כתיב.
-// תומך Gemini (חינמי) / Anthropic. פעיל רק אם הוגדר מפתח.
+// ai.js — מוח "קרמית": הבנת בקשה -> טיוטה מובנית, עריכת טיוטה בשפה טבעית, תיקון כתיב.
+// מחזיר JSON בלבד. תומך Gemini (חינמי) / Anthropic (עם fallback למודלים).
 const config = require("./config");
+const products = require("./products");
 
 function provider() {
   if (config.ai.gemini.apiKey) return "gemini";
@@ -9,66 +10,33 @@ function provider() {
 }
 const enabled = () => provider() !== null;
 
-function buildPrompt(userText) {
-  const tpls = Object.entries(config.render.templates)
-    .map(([k, t]) => `- "${k}" = ${t.label} (${(t.aliases || []).join(", ")})`)
-    .join("\n");
-  return (
-`אתה העוזר החביב של מאפיית Cremerie בטלגרם. דבר עברית, בחום ובקיצור.
-המשתמש כותב לך חופשי. החזר אך ורק JSON תקין (בלי טקסט נוסף, בלי \`\`\`), במבנה:
-{"reply": "משפט קצר וטבעי בעברית", "items": [{"name":"שם קצר","description":"תיאור","type":"מפתח"}]}
-
-חוקים חשובים:
-- אם המשתמש מבקש להכין תגית/תגיות — מלא את items, ו-reply יהיה אישור קצר ונחמד.
-- אם זו רק שיחה/שאלה/ברכה — items=[] ו-reply עונה בנחמדות.
-- name = שם המוצר בלבד (למשל "פאי לימון", "בלאק פורסט"). אל תוסיף לשם מילים שמתארות סוג/גודל/קטגוריה כמו "עוגה", "קינוח", "גדול", "אישי" — אלה הולכות ל-type, לא לשם. אל תמציא ואל תוסיף מילים שהמשתמש לא אמר.
-- description = תיאור פרימיום, אלגנטי ומדויק, על בסיס מה שהמשתמש אמר בלבד. קצר מאוד — עד 8 מילים, שורה אחת. אל תמציא טעמים/מרכיבים שלא נרמזו. אם המשתמש נתן תיאור — תקן כתיב ונסח יפה בלי לשנות את המשמעות. אם אין תיאור — כתוב משפט קצר ומפתה לפי שם המוצר.
-- type אחד מהמפתחות; אם המשתמש ציין "עוגה/גדול" -> cakes, "קינוח/אישי" -> desserts; אם לא ברור -> "${config.render.defaultTemplate}".
-- בלי הסימן %, כתוב "אחוז". בלי אימוג'ים בתוך התגית.
-סוגים:
-${tpls}
-
-הודעת המשתמש:
-${userText}`
-  );
-}
-
+// --- ספקים ---
 async function callGemini(prompt) {
   const { apiKey, model } = config.ai.gemini;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-  const res = await fetch(url, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.5, maxOutputTokens: config.ai.maxTokens } }),
-  });
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.3, maxOutputTokens: config.ai.maxTokens } }) });
   if (!res.ok) throw new Error(`Gemini ${res.status}: ${await res.text()}`);
   const d = await res.json();
   return (((d.candidates || [])[0] || {}).content || {}).parts?.[0]?.text || "";
 }
-
-async function anthropicOnce(prompt, model) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": config.ai.anthropic.apiKey, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model, max_tokens: config.ai.maxTokens, messages: [{ role: "user", content: prompt }] }),
-  });
-  return res;
-}
-
 async function callAnthropic(prompt) {
   const a = config.ai.anthropic;
   const models = [a.model, ...(a.fallbackModels || [])].filter((m, i, arr) => m && arr.indexOf(m) === i);
   let lastErr = "";
   for (const m of models) {
-    const res = await anthropicOnce(prompt, m);
+    const res = await fetch("https://api.anthropic.com/v1/messages", { method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": a.apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model: m, max_tokens: config.ai.maxTokens, messages: [{ role: "user", content: prompt }] }) });
     if (res.ok) { const d = await res.json(); return (d.content || []).map((c) => c.text || "").join(""); }
-    const body = await res.text();
-    lastErr = `${res.status}: ${body}`;
-    // אם המודל לא קיים -> ננסה את הבא; אחרת נעצור
+    const body = await res.text(); lastErr = `${res.status}: ${body}`;
     if (!/not_found|model/i.test(body)) break;
   }
   throw new Error(`Anthropic ${lastErr}`);
 }
-
+async function callAI(prompt) {
+  return provider() === "gemini" ? callGemini(prompt) : callAnthropic(prompt);
+}
 function extractJson(text) {
   if (!text) return null;
   let t = text.replace(/```json/gi, "").replace(/```/g, "").trim();
@@ -77,18 +45,102 @@ function extractJson(text) {
   try { return JSON.parse(t); } catch (_) { return null; }
 }
 
-// analyze(text) -> { reply, items:[{name,description,type}] }
-async function analyze(userText) {
-  const p = provider();
-  if (!p) throw new Error("AI לא מופעל");
-  const prompt = buildPrompt(userText);
-  const raw = p === "gemini" ? await callGemini(prompt) : await callAnthropic(prompt);
-  const obj = extractJson(raw) || {};
-  const items = Array.isArray(obj.items) ? obj.items
-    .filter((x) => x && x.name)
-    .map((x) => ({ name: String(x.name).trim(), description: String(x.description || "").trim(), type: x.type })) : [];
-  const reply = typeof obj.reply === "string" ? obj.reply.trim() : "";
-  return { reply, items };
+function templateHint() {
+  return Object.entries(config.render.templates)
+    .map(([k, t]) => `"${k}"=${t.label}(${(t.aliases || []).join("/")})`).join("; ");
+}
+function productIndex() {
+  return products.all().map((p) => `${p.name}${p.aliases && p.aliases.length ? " ("+p.aliases.join("/")+")" : ""}`).join("; ");
 }
 
-module.exports = { enabled, provider, analyze };
+// ---- ניתוח הודעה חופשית -> טיוטה ----
+function analyzePrompt(userText) {
+  return (
+`את "קרמית", העוזרת החכמה של מאפיית Cremerie. דברי עברית, בחום, בקיצור ובנימוס.
+המשתמשת כותבת חופשי. החזירי אך ורק JSON תקין (בלי טקסט נוסף, בלי \`\`\`) במבנה:
+{
+ "intent": "create" | "edit" | "chat",
+ "confidence": 0.0-1.0,
+ "userReply": "משפט קצר וטבעי בעברית",
+ "items": [ {"name":"שם נקי","description":"תיאור או ריק","type":"מפתח תבנית","qty":1,"known":true/false,"descStyle":"default|short|premium"} ],
+ "missingFields": ["..."],
+ "shouldRenderPdf": false
+}
+
+חוקים:
+- תקני תמיד שגיאות כתיב — גם בשמות וגם בתיאורים.
+- name = שם המוצר בלבד, נקי. בלי מילים שמתארות סוג/גודל ("עוגה","קינוח","גדול","אישי") — אלה ל-type.
+- אם השם תואם מוצר מוכר מהרשימה למטה — החזירי את השם הקנוני המדויק, known=true, ואל תכתבי description (המערכת תמלא מהספרייה). אם המשתמשת ביקשה "יוקרתי/פרימיום" -> descStyle="premium"; "קצר" -> "short".
+- אם המוצר לא מוכר (known=false): אם המשתמשת נתנה פרטים — נסחי תיאור קצר ומדויק מהם. אם לא — תני תיאור כללי ומפתה בלי להמציא רכיבים ספציפיים שלא נכתבו, והוסיפי "description:<name>" ל-missingFields.
+- qty: אם נכתב "כפול 4"/"×4"/"4 יחידות" -> qty=4.
+- type לכל פריט: עוגה/גדול->cakes, קינוח/אישי->desserts; אם לא ברור-> ברירת מחדל "${config.render.defaultTemplate}".
+- intent="edit" אם זו בקשת עריכה לטיוטה קיימת (אבל בד"כ זה מטופל בנפרד). intent="chat" אם זו רק שיחה/שאלה (items=[]).
+- confidence נמוך (<0.5) אם לא ברור מה רוצים — אז shouldRenderPdf=false ו-userReply שואל שאלה מבהירה.
+- תיאור: עד 8 מילים, שורה אחת, סגנון פרימיום-אך-תמציתי. בלי הסימן %, כתבי "אחוז". בלי גרש/אפוסטרוף (כתבי "פאדגי" בלי גרש). בלי אימוג'ים בתוך התגית.
+
+תבניות: ${templateHint()}
+מוצרים מוכרים: ${productIndex()}
+
+הודעת המשתמשת:
+${userText}`
+  );
+}
+
+async function analyze(userText) {
+  if (!provider()) throw new Error("AI לא מופעל");
+  const raw = await callAI(analyzePrompt(userText));
+  const o = extractJson(raw) || {};
+  const items = Array.isArray(o.items) ? o.items.filter((x) => x && x.name).map((x) => ({
+    name: String(x.name).trim(),
+    description: String(x.description || "").trim(),
+    type: x.type, qty: Math.max(1, parseInt(x.qty, 10) || 1),
+    known: !!x.known, descStyle: x.descStyle || "default",
+  })) : [];
+  return {
+    intent: o.intent || (items.length ? "create" : "chat"),
+    confidence: typeof o.confidence === "number" ? o.confidence : (items.length ? 0.8 : 0.4),
+    userReply: typeof o.userReply === "string" ? o.userReply.trim() : "",
+    items,
+    missingFields: Array.isArray(o.missingFields) ? o.missingFields : [],
+    shouldRenderPdf: !!o.shouldRenderPdf,
+  };
+}
+
+// ---- עריכת טיוטה בשפה טבעית ----
+function editPrompt(draftItems, instruction) {
+  const draft = draftItems.map((t, i) =>
+    `${i + 1}. שם: ${t.name} | תיאור: ${t.description} | סוג: ${t.template} | כמות: ${t.qty || 1}`).join("\n");
+  return (
+`את "קרמית". לפניך טיוטת תגיות, והוראת עריכה בשפה חופשית. החזירי אך ורק JSON:
+{"items":[{"name":"","description":"","type":"מפתח","qty":1}], "userReply":"משפט קצר"}
+
+כללי עריכה (בצעי בדיוק את מה שביקשו):
+- "שנה תיאור מספר 2 ל..." -> עדכני תיאור של פריט 2.
+- "מחק את 3" -> הסירי פריט 3.
+- "שכפל את 1 כפול 4" -> qty=4 לפריט 1.
+- "שנה את כולם לקינוחים אישיים" -> type=desserts לכולם.
+- "קצר את כל התיאורים" -> תיאורים קצרים יותר (עד 6 מילים).
+- "תעשה תיאור יוקרתי יותר" -> תיאורים פרימיום אך תמציתיים.
+- תקני שגיאות כתיב. בלי % (כתבי "אחוז"), בלי גרש/אפוסטרוף, בלי אימוג'ים בתגית.
+- שמרי פריטים שלא נגעו בהם כפי שהם.
+type: עוגה->cakes, קינוח->desserts.
+
+טיוטה נוכחית:
+${draft}
+
+הוראת עריכה:
+${instruction}`
+  );
+}
+async function editDraft(draftItems, instruction) {
+  if (!provider()) throw new Error("AI לא מופעל");
+  const raw = await callAI(editPrompt(draftItems, instruction));
+  const o = extractJson(raw) || {};
+  const items = Array.isArray(o.items) ? o.items.filter((x) => x && x.name).map((x) => ({
+    name: String(x.name).trim(), description: String(x.description || "").trim(),
+    type: x.type, qty: Math.max(1, parseInt(x.qty, 10) || 1),
+  })) : null;
+  return { items, userReply: typeof o.userReply === "string" ? o.userReply.trim() : "" };
+}
+
+module.exports = { enabled, provider, analyze, editDraft };

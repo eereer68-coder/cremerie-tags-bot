@@ -69,4 +69,22 @@ function friendlyError(err) {
   return (code && map[code]) || (err && err.message) || "אופס, משהו השתבש. נסו שוב 🙏";
 }
 
-module.exports = { processToPdf, processStructured, reRender, friendlyError };
+
+// רינדור טיוטה (פריטים עם qty) -> PDF. אפשרות לכבות/להדליק קווי חיתוך לבקשה זו בלבד.
+async function renderDraft(items, opts = {}) {
+  const def = opts.def || config.render.defaultTemplate;
+  const tags = [];
+  for (const it of items || []) {
+    const n = Math.max(1, it.qty || 1);
+    for (let i = 0; i < n; i++) tags.push({ name: it.name, description: it.description, template: it.template || def });
+  }
+  if (tags.length === 0) { const e = new Error("אין פריטים."); e.code = "NO_TAGS"; throw e; }
+  let restore = null;
+  if (typeof opts.cutLines === "boolean" && opts.cutLines !== config.page.cutLines) {
+    restore = config.page.cutLines; config.page.cutLines = opts.cutLines;
+  }
+  try { return await renderTags(tags, def); }
+  finally { if (restore !== null) config.page.cutLines = restore; }
+}
+
+module.exports = { processToPdf, processStructured, reRender, renderDraft, friendlyError };
