@@ -4,11 +4,14 @@ const tg = require("./tg");
 const ai = require("./ai");
 const products = require("./products");
 const drafts = require("./drafts");
-const { processToPdf, renderDraft, friendlyError } = require("./pipeline");
+const { processToPdf, renderDraft, renderPreview, friendlyError } = require("./pipeline");
+const wa = require("./wa");
 const { parseList } = require("./listParser");
 const { resolveTemplate } = require("./route");
 
 const BOT = "קרמית";
+const MESSAGE_PRINT = "היי נא להדפיס בבקשה על דף A4 מסוג מדבקה ולחתוך לבודדים לפי הקווים תודה רבה עדכנו שמוכן";
+function greenApiReady() { const g = config.greenApi; return !!(g.idInstance && g.apiToken && !/PUT_/.test(g.idInstance) && !/PUT_/.test(g.apiToken)); }
 const EMOJI = { cakes: "🎂", desserts: "🍰", cupcakes: "🧁", cookiepie: "🥧" };
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 
@@ -82,8 +85,7 @@ function postButtons() {
     [{ text: "📚 היסטוריה", callback_data: "p:history" }],
   ];
   if (config.printShop) {
-    const msg = encodeURIComponent("היי, מצורף קובץ תגיות להדפסה 🙏 (יש לצרף את ה-PDF ששלחה קרמית)");
-    rows.push([{ text: "📲 שלח לבית דפוס בוואטסאפ", url: `https://wa.me/${config.printShop}?text=${msg}` }]);
+    rows.push([{ text: "📲 שלח לבית דפוס בוואטסאפ", callback_data: "p:wa" }]);
   }
   return { inline_keyboard: rows };
 }
@@ -266,6 +268,14 @@ async function sendHistory(chatId, d) {
 }
 
 // ---------- callbacks ----------
+async function producePdf(chatId, d) {
+  try {
+    const r = await renderDraft(d.items, { def: config.render.defaultTemplate });
+    d.awaiting = null; await deliver(chatId, d, r);
+    d.items = []; d.cp = null; saveDraft(chatId, d);
+  } catch (e) { return tg.sendMessage(chatId, friendlyError(e)); }
+}
+
 async function onCallback(chatId, data, cbId) {
   await tg.answerCallback(cbId);
   if (!allowed(chatId)) return;
@@ -290,11 +300,20 @@ async function onCallback(chatId, data, cbId) {
     if (!d.items.length) return tg.sendMessage(chatId, "אין טיוטה. כתבי מה מכינים 🙂");
     const missing = d.items.filter((t) => t.missingDesc);
     if (missing.length) return tg.sendMessage(chatId, `לפני הפקה, חסר תיאור ל: ${missing.map((t) => t.name).join(", ")}.\nכתבי "ערוך" והוסיפי תיאור, או "תכתבי תיאור ל${missing[0].name}".`);
-    try { const r = await renderDraft(d.items, { def: config.render.defaultTemplate });
-      d.awaiting = null; await deliver(chatId, d, r);
-      d.items = []; d.cp = null; saveDraft(chatId, d); return;
-    } catch (e) { return tg.sendMessage(chatId, friendlyError(e)); }
+    await tg.sendMessage(chatId, "מכינה תצוגה מקדימה... ⏳");
+    try {
+      const pv = await renderPreview(d.items, { def: config.render.defaultTemplate });
+      if (pv && pv.path) {
+        await tg.sendPhoto(chatId, pv.path, `תצוגה מקדימה (${pv.pages} עמ' A4). להפיק PDF?`);
+        return tg.sendMessage(chatId, "לאשר?", { inline_keyboard: [
+          [{ text: "✅ הפק PDF", callback_data: "d:produce" }],
+          [{ text: "✏️ ערוך", callback_data: "d:edit" }, { text: "❌ בטל", callback_data: "d:cancel" }],
+        ] });
+      }
+    } catch (e) { log("[preview err]", e.message); }
+    return producePdf(chatId, d); // נפילה-רכה: בלי תצוגה מקדימה
   }
+  if (data === "d:produce") return producePdf(chatId, d);
   if (data === "d:edit") { d.awaiting = "edit"; saveDraft(chatId, d);
     return tg.sendMessage(chatId, "כתבי מה לשנות 🙂\nלמשל: \"שנה תיאור 2 ל...\", \"מחק 3\", \"שכפל 1 כפול 4\", \"שנה את כולם לקינוחים\".");
   }
@@ -321,6 +340,16 @@ async function onCallback(chatId, data, cbId) {
     try { const r = await renderDraft(src, { def: config.render.defaultTemplate, cutLines: data === "p:withcut" });
       d.items = src; return deliver(chatId, d, r);
     } catch (e) { return tg.sendMessage(chatId, friendlyError(e)); }
+  }
+  if (data === "p:wa") {
+    if (!config.printShop) return tg.sendMessage(chatId, "לא הוגדר מספר בית דפוס.");
+    if (!d.lastResult || !d.lastResult.path) return tg.sendMessage(chatId, "אין PDF אחרון לשליחה. הפיקי קודם PDF 🙂");
+    if (!greenApiReady()) return tg.sendMessage(chatId, "כדי לשלוח אוטומטית את ה-PDF לבית הדפוס צריך לחבר וואטסאפ דרך GREEN-API (חינמי). פני אליי ואחבר זאת. בינתיים אפשר להוריד את ה-PDF ולשלוח ידנית 🙂");
+    await tg.sendMessage(chatId, "שולחת לבית הדפוס... ⏳");
+    try {
+      await wa.sendDocument(`${config.printShop}@c.us`, d.lastResult.path, MESSAGE_PRINT);
+      return tg.sendMessage(chatId, "נשלח לבית הדפוס בוואטסאפ ✓");
+    } catch (e) { log("[wa err]", e.message); return tg.sendMessage(chatId, "לא הצלחתי לשלוח לבית הדפוס כרגע 🙏 בדקי את חיבור ה-GREEN-API."); }
   }
   if (data === "p:history") return sendHistory(chatId, d);
 }

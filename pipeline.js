@@ -1,8 +1,10 @@
 // lib/pipeline.js — ליבה משותפת: טקסט/מבנה -> PDF. כולל שכפול ×N.
+const fs = require("fs");
+const path = require("path");
 const config = require("./config");
 const { parseList } = require("./listParser");
 const { resolveTemplateName } = require("./route");
-const { renderTagsToPdf } = require("./renderer");
+const { renderTagsToPdf, buildPageSvgs, pageSvgToPng } = require("./renderer");
 
 // שכפול לפי ×N בשם: "בלאק פורסט ×4" / "x4" / "*4"
 function expandQuantities(tags) {
@@ -87,4 +89,18 @@ async function renderDraft(items, opts = {}) {
   finally { if (restore !== null) config.page.cutLines = restore; }
 }
 
-module.exports = { processToPdf, processStructured, reRender, renderDraft, friendlyError };
+// תצוגה מקדימה: עמוד 1 כ-PNG (אם resvg זמין). אחרת null -> נפילה-רכה.
+async function renderPreview(items, opts = {}) {
+  const def = opts.def || config.render.defaultTemplate;
+  const tags = [];
+  for (const it of items || []) { const n = Math.max(1, it.qty || 1); for (let i = 0; i < n; i++) tags.push({ name: it.name, description: it.description, template: it.template || def, prices: it.prices }); }
+  if (!tags.length) return null;
+  let pageSvgs;
+  try { ({ pageSvgs } = buildPageSvgs(tags, def)); } catch (e) { return null; }
+  const outDir = config.paths.outputDir; fs.mkdirSync(outDir, { recursive: true });
+  const out = path.join(outDir, `preview-${Date.now()}.png`);
+  const p = pageSvgToPng(pageSvgs[0], out, 1100);
+  return p ? { path: p, pages: pageSvgs.length } : null;
+}
+
+module.exports = { processToPdf, processStructured, reRender, renderDraft, renderPreview, friendlyError };

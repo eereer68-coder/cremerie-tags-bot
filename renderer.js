@@ -160,4 +160,16 @@ async function renderTagsToPdf(tags, opts = {}) {
   return { path: outPath, pages, meta };
 }
 
-module.exports = { renderTagsToPdf, buildPageSvgs, buildHtml, buildTagInner, composePageSvg, RenderError };
+
+// SVG עמוד -> PNG לתצוגה מקדימה (resvg, אופציונלי; אם לא קיים מחזיר null)
+function pageSvgToPng(svg, outPath, widthPx = 1100) {
+  let Resvg;
+  try { ({ Resvg } = require("@resvg/resvg-js")); } catch (e) { return null; }
+  try {
+    const r = new Resvg(svg, { fitTo: { mode: "width", value: widthPx }, background: "white" });
+    fs.writeFileSync(outPath, r.render().asPng());
+    return outPath;
+  } catch (e) { return null; }
+}
+
+module.exports = { renderTagsToPdf, buildPageSvgs, pageSvgToPng, buildHtml, buildTagInner, composePageSvg, RenderError };

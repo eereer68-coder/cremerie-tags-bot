@@ -76,4 +76,17 @@ async function getUpdates(offset, timeout = 50) {
 // תאימות לאחור
 const sendText = (chatId, message) => sendMessage(chatId, message);
 
-module.exports = { parseUpdate, sendMessage, sendText, answerCallback, sendDocument, getUpdates };
+async function sendPhoto(chatId, filePath, caption = "") {
+  assertToken();
+  if (!fs.existsSync(filePath)) throw new Error(`קובץ לא נמצא לשליחה: ${filePath}`);
+  const buf = fs.readFileSync(filePath);
+  const form = new FormData();
+  form.append("chat_id", String(chatId));
+  if (caption) form.append("caption", caption);
+  form.append("photo", new Blob([buf], { type: "image/png" }), path.basename(filePath));
+  const res = await fetch(`${API()}/sendPhoto`, { method: "POST", body: form });
+  if (!res.ok) throw new Error(`Telegram sendPhoto נכשל (${res.status}): ${await res.text()}`);
+  return res.json();
+}
+
+module.exports = { parseUpdate, sendMessage, sendText, answerCallback, sendDocument, sendPhoto, getUpdates };
