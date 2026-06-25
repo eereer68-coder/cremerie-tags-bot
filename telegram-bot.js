@@ -41,7 +41,7 @@ const cpPriceButtons = { inline_keyboard: [
 async function startCookiePie(chatId, text) {
   const d = getDraft(chatId);
   const flavor = extractFlavor(text);
-  d.items = []; d.awaiting = null;
+  d.awaiting = null;
   d.cp = { name: "קוקי פאי", flavor: flavor || "", prices: null, stage: null };
   saveDraft(chatId, d);
   if (flavor) return askCookiePiePrice(chatId, d);
